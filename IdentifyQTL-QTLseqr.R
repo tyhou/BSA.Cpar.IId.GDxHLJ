@@ -104,10 +104,10 @@ for (i in 1:N) {
     filterSNPs(
     SNPset = qtl_output_list[[i]],
     refAlleleFreq = 0.2,
-    minTotalDepth = 100, 
+    minTotalDepth = 40, 
     maxTotalDepth = 900, 
-    depthDifference = 500,
-    minSampleDepth = 40,
+    depthDifference = 400,
+    minSampleDepth = 30,
     minGQ = 99,
     verbose = T
   )
