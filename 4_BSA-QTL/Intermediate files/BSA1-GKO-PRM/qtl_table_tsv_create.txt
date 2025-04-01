@@ -1,0 +1,15 @@
+W347_W396-qtl_table.tsv
+W347_W397-qtl_table.tsv
+W347_W398-qtl_table.tsv
+W347_W405-qtl_table.tsv
+W347_W406-qtl_table.tsv
+W347_W407-qtl_table.tsv
+W347_W475-qtl_table.tsv
+W347_W476-qtl_table.tsv
+W347_W477-qtl_table.tsv
+W347_W478-qtl_table.tsv
+W347_W479-qtl_table.tsv
+W347_W495-qtl_table.tsv
+W347_W496-qtl_table.tsv
+W347_W493-qtl_table.tsv
+W347_W494-qtl_table.tsv
