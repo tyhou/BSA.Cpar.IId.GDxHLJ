@@ -1,0 +1,86 @@
+1.	Illumina data quality control checks
+fastp --in1 11730_1.fq.gz --in2 11730_2.fq.gz --out1 11730_1_clean.fq.gz --out2 11730_2_clean.fq.gz -q 20 -u 40 -n 10 -h report.html -j report.json
+
+2.	Pacbio data quality control checks
+bam2fastq 11730.hifi_reads.bam -o 11730
+bam2fasta 11730.hifi_reads.bam -o 11730
+NanoPlot --fastq 11730.fastq.gz -o TGS-QC --maxlength 40000 -t 40 --plots hex dot
+
+3.	Preliminary assembly
+perl /share/home/wxr/software/Wengan/wengan-v0.2-bin-Linux/wengan.pl -x pacraw -a M -s /biodata/wxr/Cparvum/11730/Illumina/11730_1_clean.fq.gz,/biodata/wxr/Cparvum/11730/Illumina/11730_2_clean.fq.gz -l /biodata/wxr/Cparvum/11730/pacbio-HiFi/11730.fastq.gz -M 2000 -D 1 -p wengan-M2000 -t 30 -g 9
+spades.py --isolate -1 /biodata/wxr/Cparvum/11730/Illumina/11730_1_clean.fq.gz -2 /biodata/wxr/Cparvum/11730/Illumina/11730_2_clean.fq.gz --pacbio /biodata/wxr/Cparvum/11730/pacbio-HiFi/11730.fastq.gz --trusted-contigs wengan-M2000.fasta -o ./ -t 40 -k auto
+
+4.	Build scaffolds
+ragtag.py scaffold Cp_IIa_43IA8_genome.fasta Cp_IId_11730.fasta -o ragtag
+
+5.	Fill gaps
+python /share/home/wxr/software/Quartet/quarTeT-1.2.1/quartet_gapfiller.py -d ragtag.scaffold.fasta -g /biodata/wxr/Cparvum/11730/pacbio-HiFi/11730.fastq.gz -t 20
+
+6.	Polish
+Run.cfg
+[General]
+job_type = local
+job_prefix = nextPolish
+task = best
+rewrite = yes
+rerun = 3
+parallel_jobs = 6
+multithread_jobs = 5
+genome = ./raw.genome.fasta
+genome_size = auto
+workdir = ./01_rundir
+polish_options = -p {multithread_jobs}
+
+[sgs_option]
+sgs_fofn = ./sgs.fofn
+sgs_options = -max_depth 100 -bwa
+
+[hifi_option]
+hifi_fofn = ./hifi.fofn
+hifi_options = -min_read_len 1k -max_depth 100
+hifi_minimap2_options = -x map-pb
+
+realpath /biodata/wxr/Cparvum/11730/Illumina/11730_1_clean.fq.gz /biodata/wxr/Cparvum/11730/Illumina/11730_2_clean.fq.gz > sgs.fofn 
+realpath /biodata/wxr/Cparvum/11730/pacbio-HiFi/11730.fastq.gz > hifi.fofn
+nextPolish run.cfg
+
+7.	Gene annotation
+de novo prediction
+autoAugTrain.pl --genome= Cp_IIa_43IA8_genome.fasta --trainingset= Cp_IIa_43IA8_genome.gff --species= Cp_IIa_43IA8
+augustus --species= Cp_IIa_43IA8 --gff3=on Cp_IId_11730_genome.fasta > 11730-augustus.gff3
+
+gmes_petap.pl --ES --cores 40 --sequence Cp_IId_11730_genome.fasta --v --format GFF3
+
+homology-based prediction
+GeMoMa GeMoMaPipeline threads=40 GeMoMa.Score=ReAlign AnnotationFinalizer.r=NO p=false o=true tblastn=true t= Cp_IId_11730_genome.fasta a= Cp_IIa_43IA8_genome.gff g= Cp_IIa_43IA8_genome.fasta outdir=./ -Xms5G -Xmx50G
+
+miniprot -t 40 --gff Cp_IId_11730_genome.fasta Cp_IIa_43IA8_genome.prot.fasta > 11730-miniprot.gff3
+
+transcriptome-based prediction
+hisat2-build Cp_IId_11730_genome.fasta Cp_IId_11730_genome
+hisat2 --dta -p 40 -x Cp_IId_11730_genome -1 /biodata/wxr/Cparvum/11730/RNAsep/11730_1_clean.fq.gz -2 /biodata/wxr/Cparvum/11730/RNAseq/11730_2_clean.fq.gz | samtools sort -@ 10 > 11730-hisat2.Leaf.bam
+
+stringtie 11730-hisat2.Leaf.bam -o 11730-stringtie.gtf -p 40
+gtf_genome_to_cdna_fasta.pl 11730-stringtie.gtf Cp_IId_11730_genome.fasta > transcripts.fasta
+gtf_to_alignment_gff3.pl 11730-stringtie.gtf > transcripts.gff3
+TransDecoder.LongOrfs -t transcripts.fasta
+TransDecoder.Predict -t transcripts.fasta
+cdna_alignment_orf_to_genome_orf.pl transcripts.fasta.transdecoder.gff3 transcripts.gff3 transcripts.fasta > transcripts.fasta.transdecoder.genome.gff3
+
+Trinity --CPU 40 --max_memory 100G --genome_guided_bam 11730-hisat2.Leaf.bam --genome_guided_max_intron 10000
+Launch_PASA_pipeline.pl -c alignAssembly.config -C -R -g Cp_IId_11730_genome.fasta -t 11730_RNAseq_trinity.fasta --ALIGNERS blat,gmap,minimap2 --CPU 40
+
+8.	Combine and filter annotations
+EVidenceModeler --sample_id Cp_IId_11730 --weights weights.txt --genome Cp_IId_11730_genome.fasta --gene_predictions gene_predictions.gff3 --protein_alignments protein_alignments.gff3 --transcript_alignments transcript_alignments.gff3 --segmentSize 100000 --overlapSize 10000
+
+agat_sp_filter_incomplete_gene_coding_models.pl --gff Cp_IId_11730_genome.gff3 --fasta Cp_IId_11730_genome.fasta -o Cp_IId_11730_genome_complete.gff3
+
+9.	Telomeres prediction
+python /share/home/wxr/software/FindTelomeres/FindTelomeres.py Cp_IId_11730_genome.fasta
+
+10.	tRNA prediction
+tRNAscan-SE -o tRNA.out -f tRNA.ss -m tRNA.stats Cp_IId_11730_genome.fasta
+
+11.	rRNA prediction
+barrnap --kingdom euk --threads 40 --outseq rRNA.fa Cp_IId_11730_genome.fasta > rRNA.gff3
+
